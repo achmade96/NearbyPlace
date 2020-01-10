@@ -13,6 +13,8 @@ import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.google.android.gms.location.*
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
@@ -23,18 +25,34 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.Marker
 import com.google.android.gms.maps.model.MarkerOptions
 import com.tinfive.nearbyplace.Common.Common
+import com.tinfive.nearbyplace.Model.DataMasjid
 import com.tinfive.nearbyplace.Model.MyPlaces
+import com.tinfive.nearbyplace.Model.Results
 import com.tinfive.nearbyplace.Remote.IGoogleAPIService
+import io.reactivex.android.schedulers.AndroidSchedulers
+import io.reactivex.disposables.CompositeDisposable
+import io.reactivex.schedulers.Schedulers
+import kotlinx.android.synthetic.main.activity_maps.*
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
+import retrofit2.Retrofit
+import retrofit2.adapter.rxjava2.RxJava2CallAdapterFactory
+import retrofit2.converter.gson.GsonConverterFactory
 import java.io.IOException
 import java.util.*
 
 
-class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
+class MapsActivity : AppCompatActivity(), AdapterMasjid.Listener, OnMapReadyCallback {
 
     private lateinit var mMap: GoogleMap
+
+    private var myListAdapter: AdapterMasjid? = null
+    private var myCompositeDisposable: CompositeDisposable? = null
+    private var myModelListAdapter: ArrayList<Results>? = null
+
+    //original
+    private val BASE_URL = "https://raw.githubusercontent.com/"
 
     private var latitude: Double = 0.toDouble()
     private var longtitude: Double = 0.toDouble()
@@ -58,6 +76,10 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_maps)
+        myCompositeDisposable = CompositeDisposable()
+        initRecyclerView()
+        initRecyclerView()
+        loadData()
         // Obtain the SupportMapFragment and get notified when the map is ready to be used.
         val mapFragment = supportFragmentManager
             .findFragmentById(R.id.map) as SupportMapFragment
@@ -135,10 +157,7 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
                                     val markerOptions = MarkerOptions()
                                         .position(latLng)
                                         .title("Your Position")
-                                        .icon(
-                                            BitmapDescriptorFactory.defaultMarker(
-                                                BitmapDescriptorFactory.HUE_GREEN
-                                            )
+                                        .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
                                         )
                                     val googlePlaces = response.body()!!.results!![i]
                                     val lat = googlePlaces.geometry!!.location!!.lat
@@ -148,6 +167,7 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
 
                                     markerOptions.position(latLng)
                                     markerOptions.title(placeName)
+
 
                                     //Add marker to map
                                     mMap.addMarker(markerOptions)
@@ -191,43 +211,15 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
 
     private fun getUrl(latitude: Double, longtitude: Double): String {
         val googlePlaceUrl =
-            StringBuilder("https://raw.githubusercontent.com/achmade96/lokasimasjid/master/lokasimasjid.json")
-        /*googlePlaceUrl.append("?location=$latitude,$longtitude")
-        googlePlaceUrl.append("&radius=1000") //1000=1km
-        googlePlaceUrl.append("&type=$typePlace")
-        googlePlaceUrl.append("&key=AIzaSyBHkbWKsDCZtTUPn-qW-Lzjzmkbj7_1LmY")*/
+            StringBuilder("https://maps.googleapis.com/maps/api/place/nearbysearch/json")
+        googlePlaceUrl.append("?location=$latitude,$longtitude")
+        googlePlaceUrl.append("&radius=500") //1000=1km
+        googlePlaceUrl.append("&type=mosque")
+        googlePlaceUrl.append("&key=AIzaSyBHkbWKsDCZtTUPn-qW-Lzjzmkbj7_1LmY")
 
         Log.d("URL_DEBUG", googlePlaceUrl.toString())
         return googlePlaceUrl.toString()
     }
-
-    /*private fun buildLocationCallback() {
-        locationCallback = object : LocationCallback() {
-            override fun onLocationResult(p0: LocationResult?) {
-                mLastLocation = p0!!.locations.get(p0.locations.size - 1) //Get Last Location
-                if (mMarker != null) {
-                    mMarker!!.remove()
-                }
-
-                latitude = mLastLocation.latitude
-                longtitude = mLastLocation.longitude
-
-                val latLng = LatLng(latitude, longtitude)
-                val markerOptions = MarkerOptions()
-                    .position(latLng)
-                    .title("Your Position")
-                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN))
-
-                //tes
-
-                mMarker = mMap.addMarker(markerOptions)
-
-                //Move Camera
-                mMap.moveCamera(CameraUpdateFactory.newLatLng(latLng))
-                mMap.animateCamera(CameraUpdateFactory.zoomTo(17f))
-            }
-        }
-    }*/
 
     private fun buildLocationRequest() {
         locationRequest = LocationRequest()
@@ -324,5 +316,37 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
     override fun onStop() {
         fusedLocationProviderClient.removeLocationUpdates(locationCallback)
         super.onStop()
+    }
+
+    //DATAMASJID
+    private fun initRecyclerView() {
+        val layoutManager: RecyclerView.LayoutManager = LinearLayoutManager(this)
+        listView.layoutManager = layoutManager
+    }
+
+    private fun loadData() {
+        val requestInterface = Retrofit.Builder()
+            .baseUrl(BASE_URL)
+            .addConverterFactory(GsonConverterFactory.create())
+            .addCallAdapterFactory(RxJava2CallAdapterFactory.create())
+            .build().create(IGoogleAPIService::class.java)
+
+        myCompositeDisposable?.add(
+            requestInterface.getMosque()
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribeOn(Schedulers.io())
+                .subscribe(this::handleResponse)
+        )
+
+    }
+
+    private fun handleResponse(modelList: List<Results>) {
+        myModelListAdapter = ArrayList(modelList)
+        myListAdapter = AdapterMasjid(myModelListAdapter!!, this)
+        listView.adapter = myListAdapter
+    }
+
+    override fun onItemClick(model: Results) {
+        Toast.makeText(this, "You clicked: ${model.nama_masjid}", Toast.LENGTH_LONG).show()
     }
 }

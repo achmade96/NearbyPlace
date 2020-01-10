@@ -5,7 +5,7 @@ import com.tinfive.nearbyplace.Remote.RetrofitClient
 
 object Common {
 
-    private val GOOGLE_API_URL = "https://raw.githubusercontent.com/"
+    private val GOOGLE_API_URL = "https://maps.googleapis.com/"
 
     ////////////////////////
 
